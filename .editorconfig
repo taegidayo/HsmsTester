@@ -1,0 +1,5 @@
+﻿[*.cs]
+
+# CS8625: Null 리터럴을 null을 허용하지 않는 참조 형식으로 변환할 수 없습니다.
+dotnet_diagnostic.CS8625.severity = none
+charset = utf-8-bom
