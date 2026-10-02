@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace HsmsTester
@@ -51,6 +52,7 @@ namespace HsmsTester
         Exception = 99,
     }
 
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum eSessionSType : byte
     {
         DataMessage = 0x00,
@@ -81,7 +83,7 @@ namespace HsmsTester
         ALMXC_UNKNOWN_STREAM = 222,
         ALMXC_UNKNOWN_FUNC = 223,
     }
-
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum eHsmsDataType
     {
         LIST = 0x00,

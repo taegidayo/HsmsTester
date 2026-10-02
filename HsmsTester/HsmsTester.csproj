@@ -7,7 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Database\" />
     <Folder Include="Tcp\" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>

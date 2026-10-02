@@ -39,7 +39,7 @@ namespace HsmsTester.Hsms.Struct
         /// </summary>
         public byte Stype = 0;
 
-        public int SystemByte = 0;
+        public uint SystemByte = 0;
 
         /// <summary>
         /// DataMessage에서 응답을 요구하는 메시지인 경우 true가 된다.
@@ -95,7 +95,7 @@ namespace HsmsTester.Hsms.Struct
             if (BitConverter.IsLittleEndian == false)
             {
                 // 리틀 엔디언이면 그대로 사용
-                SystemByte = BitConverter.ToInt32(recvMsg, 10);
+                SystemByte = (uint)BitConverter.ToInt32(recvMsg, 10);
             }
             else
             {
@@ -103,7 +103,7 @@ namespace HsmsTester.Hsms.Struct
                 byte[] temp = new byte[4];
                 Array.Copy(recvMsg, 10, temp, 0, 4);
                 Array.Reverse(temp);
-                SystemByte = BitConverter.ToInt32(temp, 0);
+                SystemByte = (uint)BitConverter.ToInt32(temp, 0);
             }
 
             byte[] sysByte = BitConverter.GetBytes(SystemByte);

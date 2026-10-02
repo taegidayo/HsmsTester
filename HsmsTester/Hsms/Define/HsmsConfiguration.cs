@@ -1,4 +1,5 @@
-﻿using System;
+﻿using HsmsTester.Util;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -17,14 +18,37 @@ namespace HsmsTester.Hsms.Define
         // 파일을 사용하는 경우(Client만 가능)
         internal HsmsConfiguration(string configPath)
         {
-            _hsmsConfigType = HsmsConfigType.CFG;
-        }
+            ConfigPath = configPath;
 
+            _deviceID = IniFileHandler.GetIniFileData(ConfigPath, "Base", "DeviceID", (short)1);
+            _host = IniFileHandler.GetIniFileData(ConfigPath, "Base", "Host", false);
+            _smlPath = IniFileHandler.GetIniFileData(ConfigPath, "Base", "SML", string.Empty);
+            _ipAddress = IniFileHandler.GetIniFileData(ConfigPath, "Base", "IP", "127.0.0.1");
+            _port = IniFileHandler.GetIniFileData(ConfigPath, "Base", "Port", 8000);
+            _active = IniFileHandler.GetIniFileData(ConfigPath, "Base", "Active", true);
+            _useMsgClass = IniFileHandler.GetIniFileData(ConfigPath, "Base", "UseMsgClass", false);
+            _t3 = IniFileHandler.GetIniFileData(ConfigPath, "Timeout", "T3", 45);
+            _t5 = IniFileHandler.GetIniFileData(ConfigPath, "Timeout", "T5", 10);
+            _t6 = IniFileHandler.GetIniFileData(ConfigPath, "Timeout", "T6", 5);
+            _t7 = IniFileHandler.GetIniFileData(ConfigPath, "Timeout", "T7", 10);
+            _t8 = IniFileHandler.GetIniFileData(ConfigPath, "Timeout", "T8", 5);
+            _logUse = IniFileHandler.GetIniFileData(ConfigPath, "LOG", "LogUse", true);
+            _loggingEvent = IniFileHandler.GetIniFileData(ConfigPath, "LOG", "LoggingEvent", true);
+            _loggingAlarm = IniFileHandler.GetIniFileData(ConfigPath, "LOG", "LoggingAlarm", true);
+            _loggingHour = IniFileHandler.GetIniFileData(ConfigPath, "LOG", "LoggingHour", true);
+            _logPath = IniFileHandler.GetIniFileData(ConfigPath, "LOG", "LoggingAlarm", $"{Path.GetDirectoryName(ConfigPath)}/LOG");
+            _keepDays = IniFileHandler.GetIniFileData(ConfigPath, "LOG", "KeepDays", 30);
+            _hsmsConfigType = HsmsConfigType.CFG;
+        }  
+
+        public string ConfigPath { get; private set; }
         private HsmsConfigType _hsmsConfigType = HsmsConfigType.JSON;
+
 
         // 기존의 Xcom과는 다르 게, Config를 라이브러리 내에서 자주 호출되기 때문에, 성능향상을 위해 GetIniFileData는 한번만 호출되도록 한다..
         private short _deviceID;
         private bool _host;
+        private string _smlPath;
         private string _ipAddress;
         private int _port;
         private bool _active;
@@ -51,7 +75,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _deviceID = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Base", "DeviceID", value) == true)
+                            {
+                                _deviceID = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -72,12 +99,39 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _host = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Base", "Host", value) == true)
+                            {
+                                _host = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
                         {
                             _host = value;
+                        }
+                        break;
+                }
+            }
+        }
+
+        public string SMLPath
+        {
+            get => _smlPath;
+            set
+            {
+                switch (_hsmsConfigType)
+                {
+                    case HsmsConfigType.CFG:
+                        {
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Base", "SML", value) == true)
+                            {
+                                _smlPath = value;
+                            }
+                        }
+                        break;
+                    case HsmsConfigType.JSON:
+                        {
+                            _smlPath = value;
                         }
                         break;
                 }
@@ -93,7 +147,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _ipAddress = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Base", "IP", value) == true)
+                            {
+                                _ipAddress = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -114,7 +171,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _port = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Base", "Port", value) == true)
+                            {
+                                _port = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -136,7 +196,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _active = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Base", "Active", value) == true)
+                            {
+                                _active = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -160,7 +223,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _useMsgClass = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Base", "UseMsgClass", value) == true)
+                            {
+                                _useMsgClass = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -171,6 +237,8 @@ namespace HsmsTester.Hsms.Define
                 }
             }
         }
+
+
 
         #region Timeout
         /// <summary>
@@ -185,7 +253,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _t3 = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Timeout", "T3", value) == true)
+                            {
+                                _t3 = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -208,7 +279,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _t5 = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Timeout", "T5", value) == true)
+                            {
+                                _t5 = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -227,7 +301,10 @@ namespace HsmsTester.Hsms.Define
             get => _t6;
             set
             {
-                _t6 = value;
+                if (IniFileHandler.WriteIniFileData(ConfigPath, "Timeout", "T6", value) == true)
+                {
+                    _t6 = value;
+                }
             }
         }
         /// <summary>
@@ -242,7 +319,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _t7 = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Timeout", "T7", value) == true)
+                            {
+                                _t7 = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -265,7 +345,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _t8 = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "Timeout", "T8", value) == true)
+                            {
+                                _t8 = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -276,6 +359,8 @@ namespace HsmsTester.Hsms.Define
                 }
             }
         }
+
+
 
         #endregion
 
@@ -290,7 +375,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _logUse = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "LOG", "LogUse", value) == true)
+                            {
+                                _logUse = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -311,7 +399,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _loggingEvent = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "LOG", "LoggingEvent", value) == true)
+                            {
+                                _loggingEvent = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -332,7 +423,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _loggingAlarm = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "LOG", "LoggingAlarm", value))
+                            {
+                                _loggingAlarm = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -353,7 +447,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _loggingHour = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "LOG", "LoggingHour", value) == true)
+                            {
+                                _loggingHour = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -377,7 +474,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _logPath = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "LOG", "LoggingAlarm", value) == true)
+                            {
+                                _logPath = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -398,7 +498,10 @@ namespace HsmsTester.Hsms.Define
                 {
                     case HsmsConfigType.CFG:
                         {
-                            _keepDays = value;
+                            if (IniFileHandler.WriteIniFileData(ConfigPath, "LOG", "KeepDays", value) == true)
+                            {
+                                _keepDays = value;
+                            }
                         }
                         break;
                     case HsmsConfigType.JSON:
@@ -415,6 +518,7 @@ namespace HsmsTester.Hsms.Define
         {
             DeviceID = 1;
             Host = false;
+            SMLPath = $"{Path.GetDirectoryName(ConfigPath)}\\hsms.sml";
             IPAddress = "127.0.0.1";
             Port = 8000;
             Active = false;
@@ -428,8 +532,8 @@ namespace HsmsTester.Hsms.Define
             LoggingEvent = true;
             LoggingAlarm = true;
             LoggingHour = true;
+            LogPath = $"{Path.GetDirectoryName(ConfigPath)}\\LOG";
             KeepDays = 30;
         }
     }
 }
-

@@ -394,7 +394,7 @@ namespace HsmsTester.Hsms.Struct
                             byte[] value = new byte[dataLength];
                             Array.Copy(msg, nowIndex, value, 0, dataLength);
                             double[] data = new double[dataLength / 8];
-                            for (int index = 0; index < dataLength; index++)
+                            for (int index = 0; index < dataLength / 8; index++)
                             {
                                 byte[] reversed = new byte[8];
 
@@ -410,7 +410,7 @@ namespace HsmsTester.Hsms.Struct
                                 data[index] = BitConverter.ToDouble(reversed, 0);
                             }
 
-                            nowIndex += dataLength * 8;
+                            nowIndex += dataLength;
                             byte[] temp = new byte[msg.Length - nowIndex];
 
                             Array.Copy(msg, nowIndex, temp, 0, msg.Length - nowIndex);

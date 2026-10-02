@@ -1,12 +1,18 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using HsmsTester.Hsms.Define;
+using HsmsTester.Hsms.Struct;
+using HsmsTester.Manager;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Org.BouncyCastle.Ocsp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace HsmsTester.API
@@ -17,7 +23,7 @@ namespace HsmsTester.API
 
         public static ApiListener Instance { get; } = new ApiListener();
 
-        private ApiListener() 
+        private ApiListener()
         {
             LibraryController.Instance.RegisterDisposable(this);
         }
@@ -28,6 +34,9 @@ namespace HsmsTester.API
         {
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
+            builder.Services.ConfigureHttpJsonOptions(o =>
+            o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
             _app = builder.Build();
             MapEndpoints(_app);
@@ -46,9 +55,32 @@ namespace HsmsTester.API
         // 테스트용으로 구현한 API
         private static void MapEndpoints(WebApplication app)
         {
-            app.MapGet("/api/ping", () => Results.Ok(new { message = "pong" }));
+            app.MapPost("/api/sendMsg",(HsmsJson jsonData) =>
+            {
 
-            app.MapGet("/api/status", () => Results.Ok(new { status = "running" }));
+                //send Msg 함수
+                jsonData.SetHeader();
+
+                HsmsManager.Instance.EnequeueSendMsg(jsonData.Header, jsonData.ToHsmsBytes());
+
+                return Results.Ok(new { result = "ok" });
+            });
+
+            app.MapPost("/api/defineMsgSave", (List<HsmsMsgDefine> define) =>
+            {
+                if (HsmsManager.Instance.SaveMsgDefines(define) == false)
+                {
+                    return Results.Problem("msgDefine.json 저장 실패");
+                }
+                return Results.Ok(new { result = "ok" });
+            });
+
+            app.MapPost("/api/setT3TimeoutFlag", (bool check) =>
+            {
+                HsmsManager.Instance.T3TimeoutCheckFlag = check;
+                return Results.Ok(new { result = "ok" });
+            });
+
 
             //app.MapPost("/api/echo", (EchoRequest req) =>
             //    Results.Ok(new { echo = req.Text, length = req.Text.Length }));
@@ -64,12 +96,12 @@ namespace HsmsTester.API
                 {
                     // 접속 직후 최근 로그부터 전송
                     foreach (var line in history)
-                        await ctx.Response.WriteAsync($"data: {line}\n\n");
+                        await ctx.Response.WriteAsync($"{line}\n\n");
                     await ctx.Response.Body.FlushAsync();
 
                     await foreach (var line in reader.ReadAllAsync(ctx.RequestAborted))
                     {
-                        await ctx.Response.WriteAsync($"data: {line}\n\n", ctx.RequestAborted);
+                        await ctx.Response.WriteAsync($"{line}\n\n", ctx.RequestAborted);
                         await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                     }
                 }

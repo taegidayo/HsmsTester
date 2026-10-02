@@ -15,19 +15,19 @@ namespace HsmsTester.Tcp
 
         private TcpListener? _listener;
         private CancellationTokenSource? _cts;
-        private readonly List<TcpClient> _clients = new List<TcpClient>();
+        private readonly object _lock = new object();
+        private TcpClient? _client;     // HSMS-SS : 연결은 항상 1개
 
         public bool IsRunning => _listener != null;
 
-        // 외부에서 리스트를 직접 수정하지 못하도록 스냅샷 반환
-        public IReadOnlyList<TcpClient> ConnectedClients
+        public TcpClient? ConnectedClient
         {
-            get { lock (_clients) return _clients.ToList(); }
+            get { lock (_lock) return _client; }
         }
 
-        public event Action<TcpClient>? ClientConnected;
-        public event Action<TcpClient>? ClientDisconnected;
-        public event Action<TcpClient, byte[], int>? DataReceived;
+        public event Action? ClientConnected;
+        public event Action? ClientDisconnected;
+        public event Action< byte[], int>? DataReceived;
 
         public TCPServer(string ip, int port)
         {
@@ -78,8 +78,16 @@ namespace HsmsTester.Tcp
                 catch (ObjectDisposedException) { break; }   // Stop()으로 리스너 종료
                 catch (SocketException) { continue; }        // 개별 accept 실패 → 계속 대기
 
-                lock (_clients) _clients.Add(client);
-                ClientConnected?.Invoke(client);
+                // 새 연결이 오면 기존 연결은 끊고 교체 (Host 재접속 시 남아있는 이전 소켓 정리)
+                TcpClient? old;
+                lock (_lock)
+                {
+                    old = _client;
+                    _client = client;
+                }
+                old?.Close();   // 이전 수신 루프가 종료되며 ClientDisconnected 발생
+
+                ClientConnected?.Invoke();
 
                 _ = HandleClientAsync(client, token);
             }
@@ -95,7 +103,7 @@ namespace HsmsTester.Tcp
                 {
                     int n = await stream.ReadAsync(buffer, token);
                     if (n == 0) break;                               // 클라이언트가 연결 종료
-                    DataReceived?.Invoke(client, buffer, n);
+                    DataReceived?.Invoke(buffer, n);
                 }
             }
             catch (OperationCanceledException) { }
@@ -103,26 +111,24 @@ namespace HsmsTester.Tcp
             catch (ObjectDisposedException) { }
             finally
             {
-                bool removed;
-                lock (_clients) removed = _clients.Remove(client);
+                lock (_lock)
+                {
+                    if (_client == client) _client = null;
+                }
                 client.Dispose();
-                if (removed) ClientDisconnected?.Invoke(client);
+                ClientDisconnected?.Invoke();
             }
         }
 
-        public async Task SendAsync(TcpClient client, byte[] data)
+        public async Task SendAsync(byte[] data)
         {
-            if (client.Connected == false) return;
+            var client = ConnectedClient;
+            if (client is null || client.Connected == false) return;
             try
             {
                 await client.GetStream().WriteAsync(data, _cts?.Token ?? CancellationToken.None);
             }
             catch (IOException) { client.Close(); }   // 수신 루프가 정리하도록 소켓만 닫음
-        }
-
-        public Task BroadcastAsync(byte[] data)
-        {
-            return Task.WhenAll(ConnectedClients.Select(c => SendAsync(c, data)));
         }
 
         public void Stop()
@@ -131,10 +137,7 @@ namespace HsmsTester.Tcp
             _listener?.Stop();
             _listener = null;
 
-            foreach (var client in ConnectedClients)
-            {
-                client.Close();
-            }
+            ConnectedClient?.Close();
         }
 
         public void Dispose()

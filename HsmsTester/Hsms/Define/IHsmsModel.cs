@@ -40,7 +40,7 @@ namespace HsmsTester.Hsms.Struct
 
         public string StreamFunction => string.Format("S{0}F{1}", this.Stream, this.Function);
 
-        public int SysByte { get => this._header.SystemByte; set => this._header.SystemByte = value; }
+        public uint SysByte { get => this._header.SystemByte; set => this._header.SystemByte = value; }
 
         public void SetHsmsMsgInfo(HsmsHeaderMessage header)
         {
