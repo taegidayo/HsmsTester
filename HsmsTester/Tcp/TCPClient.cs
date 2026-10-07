@@ -10,11 +10,11 @@ namespace HsmsTester.Tcp
 {
     public class TCPClient : IDisposable
     {
-        private TcpClient _client = new TcpClient();
+        private TcpClient? _client = null;
 
         public bool IsConnected => _client != null && _client.Connected;
 
-        private readonly CancellationTokenSource _cts = new();
+        private CancellationTokenSource _cts = new();
         public IPAddress? IP { get; private set; } = null;
         public int Port { get; private set; }
 
@@ -22,17 +22,14 @@ namespace HsmsTester.Tcp
         public event Action? Disconnected;
         public event Action<byte[], int>? DataReceived;
 
+        // 생성만 하고 연결은 하지 않는다. 이벤트 구독 후 ConnectRequest()로 연결 시작
         public TCPClient(string ip, int port)
         {
-            _client = new TcpClient();
-
+            Port = port;
             if (IPAddress.TryParse(ip, out var address) == true)
             {
                 IP = address;
-
-                ConnectRequest();
             }
-
         }
 
         public bool SetTcpProperty(string ip,int port)
@@ -53,49 +50,61 @@ namespace HsmsTester.Tcp
             if (IP == null) return false;
             Disconnect();
 
-            RunAsync(_cts.Token);
+            // 취소된 토큰은 되돌릴 수 없으므로 연결할 때마다 새로 만든다
+            _cts = new CancellationTokenSource();
+            _ = RunAsync(_cts.Token);
             return true;
         }
 
         private async Task RunAsync(CancellationToken token)
         {
-            if (token.IsCancellationRequested == true)
-            {
-                _cts.TryReset();
-            }
-
             while (token.IsCancellationRequested == false)
             {
+                if (IP == null) return;
+
+                // 재연결 시 이전 루프가 새 연결을 건드리지 않도록 이번 루프의 소켓은 지역 변수로 관리
+                var client = new TcpClient();
+                _client = client;
+                bool connected = false;
                 try
                 {
-                    _client = new TcpClient();
-                    if (IP == null) return;
-
                     // 연결을 기다리는 동안 스레드는 점유되지 않음
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                     timeout.CancelAfter(TimeSpan.FromSeconds(3));
-                    await _client.ConnectAsync(IP, Port, timeout.Token);
+                    await client.ConnectAsync(IP, Port, timeout.Token);
 
+                    connected = true;
                     Connected?.Invoke();
-                    await ReceiveLoopAsync(_client, token);   // 연결 유지하며 수신
+                    await ReceiveLoopAsync(client, token);   // 연결 유지하며 수신
                 }
-                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                catch (OperationCanceledException) when (token.IsCancellationRequested == false)
                 {
                     // 연결 타임아웃 → 재시도
                 }
+                catch (OperationCanceledException)
+                {
+                    // Disconnect() 요청 → 종료
+                }
                 catch (SocketException)
                 {
-                    // 연결 거부/끊김 → 재시도
+                    // 연결 거부 → 재시도
+                }
+                catch (IOException)
+                {
+                    // 수신 중 연결 끊김 → 재시도
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Disconnect()로 소켓 닫힘 → 종료
                 }
                 finally
                 {
-                    bool wasConnected = _client.Connected;
-                    _client.Dispose();
-                    _client = null;
-                    if (wasConnected) Disconnected?.Invoke();
+                    client.Dispose();
+                    if (_client == client) _client = null;
+                    if (connected == true) Disconnected?.Invoke();
                 }
 
-                if (!token.IsCancellationRequested)
+                if (token.IsCancellationRequested == false)
                     await Task.Delay(1000, token).ContinueWith(_ => { }); // 재시도 간격
             }
         }
@@ -114,15 +123,15 @@ namespace HsmsTester.Tcp
 
         public async Task SendAsync(byte[] data)
         {
-            if (_client is { Connected: true })
-                await _client.GetStream().WriteAsync(data, _cts.Token);
+            var client = _client;
+            if (client is { Connected: true })
+                await client.GetStream().WriteAsync(data, _cts.Token);
         }
 
         public void Disconnect()
         {
             _cts.Cancel();
-            _client.Close();
-            _client.Dispose();
+            _client?.Close();       // 수신 루프의 finally에서 Dispose
         }
 
         public void Dispose()

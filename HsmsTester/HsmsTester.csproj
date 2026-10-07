@@ -9,6 +9,8 @@
   <ItemGroup>
     <Folder Include="Tcp\" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- WPF에서 API 대신 HsmsManager 등을 직접 호출 -->
+    <InternalsVisibleTo Include="HsmsTester.Wpf" />
   </ItemGroup>
 
   <ItemGroup>

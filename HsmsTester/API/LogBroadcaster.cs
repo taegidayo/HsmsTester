@@ -24,7 +24,7 @@ namespace HsmsTester.API
         // 라이브러리 어디서든 호출: LogBroadcaster.Write("작업 시작");
         public void Write(string message)
         {
-            var line = $"[{DateTime.Now:HH:mm:ss}] {message}".Replace("\n", " ");
+            var line = $"[{DateTime.Now:yyyy/MM/dd HH:mm:ss}] {message}";
 
             _history.Enqueue(line);
             while (_history.Count > HistorySize) _history.TryDequeue(out _);
@@ -51,7 +51,12 @@ namespace HsmsTester.API
 
         public void Dispose()
         {
-            throw new NotImplementedException();
+            foreach (var client in _clients.ToList())
+            {
+                _clients.TryRemove(client.Key, out var ch);
+
+                client.Value.Writer.TryComplete();
+            }
         }
     }
 }

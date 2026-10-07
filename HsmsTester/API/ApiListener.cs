@@ -52,7 +52,6 @@ namespace HsmsTester.API
             _app = null;
         }
 
-        // 테스트용으로 구현한 API
         private static void MapEndpoints(WebApplication app)
         {
             app.MapPost("/api/sendMsg",(HsmsJson jsonData) =>
@@ -75,10 +74,60 @@ namespace HsmsTester.API
                 return Results.Ok(new { result = "ok" });
             });
 
+            // 현재 메시지 정의 전달 (defineMsgSave로 저장한 것과 같은 형식)
+            app.MapGet("/api/defineMsgLoad", () => Results.Ok(HsmsManager.Instance.HsmsMsgDefines));
+
+            // 조건 응답 정의 전달 / 저장 (실행폴더/conditionalDefine.json)
+            app.MapGet("/api/conditionalDefineLoad", () => Results.Ok(HsmsManager.Instance.HsmsConditionalDefines));
+
+            app.MapPost("/api/conditionalDefineSave", (List<HsmsConditionalDefine> defines) =>
+            {
+                if (HsmsManager.Instance.SaveConditionalDefines(defines) == false)
+                {
+                    return Results.Problem("conditionalDefine.json 저장 실패");
+                }
+                return Results.Ok(new { result = "ok" });
+            });
+
+            // 현재 Hsms 설정 전달
+            app.MapGet("/api/configLoad", () => Results.Ok(HsmsManager.Instance.Config.ToData()));
+
+            // Hsms 설정 변경 (보낸 항목만 변경, cfg 파일에도 저장됨)
+            app.MapPost("/api/configSave", (HsmsConfigData data) =>
+            {
+                var errors = HsmsManager.Instance.Config.Apply(data);
+                if (errors.Count > 0)
+                {
+                    return Results.BadRequest(new { result = "fail", errors });
+                }
+
+                HsmsManager.Instance.Start();
+
+                return Results.Ok(HsmsManager.Instance.Config.ToData());
+            });
+
             app.MapPost("/api/setT3TimeoutFlag", (bool check) =>
             {
                 HsmsManager.Instance.T3TimeoutCheckFlag = check;
                 return Results.Ok(new { result = "ok" });
+            });
+
+            app.MapPost("/api/tcpChange", (bool onOff) =>
+            {
+                if (onOff == true)
+                {
+                    HsmsManager.Instance.Start();
+                }
+                else
+                {
+                    HsmsManager.Instance.Dispose();
+                }
+            });
+
+            app.MapGet("/api/status", () =>
+            {
+                var manager = HsmsManager.Instance;
+                return Results.Ok(new { IsConnect = manager.IsConnected(), manager.IsSelected });
             });
 
 
@@ -112,18 +161,12 @@ namespace HsmsTester.API
                 }
             });
 
-            // 기존 echo에 로그 추가 예시
-            app.MapPost("/api/echo", (EchoRequest req) =>
-            {
-                LogBroadcaster.Instance.Write($"echo 요청: {req.Text}");
-                return Results.Ok(new { echo = req.Text, length = req.Text.Length });
-            });
 
         }
 
         public void Dispose()
         {
-            throw new NotImplementedException();
+             _app?.DisposeAsync();
         }
     }
 

@@ -27,7 +27,11 @@ namespace HsmsTester.Hsms.Struct
         public string SubName { get; set; } = string.Empty;
         public string FullName => $"{Name}-{SubName}";
         public bool IsAutoResponse { get; set; } // 자동응답이 가능한 메시지인지 확인하기 위한 변수, S6F11에서 true라면 자동으로 S6F12에 대해 응답을 보낸다.
-        public HsmsField? Body { get; set; } = null;    // 실제 Body 데이터, null이면 Header만 전송 (ex. S1F1)
+        public HsmsField? Body { get; set; } = null;
+
+        // ApplyDefine()에서 일치한 메시지 정의 원본 (자동 응답 시 같은 쌍의 Secondary를 찾기 위해 사용)
+        [JsonIgnore]
+        public HsmsJson? Define { get; private set; } = null;    // 실제 Body 데이터, null이면 Header만 전송 (ex. S1F1)
 
         // 메시지 내용(S, F, W)을 바탕으로 Data Message용 Header 작성. Length는 ToHsmsBytes()에서 채운다.
         public void SetHeader(uint systemByte = 0)
@@ -81,7 +85,8 @@ namespace HsmsTester.Hsms.Struct
             Name = string.Empty;            // 일치하는 정의가 없으면 빈 값
             SubName = string.Empty;
             IsAutoResponse = false;
-            ApplyDefine(defines ?? HsmsManager.Instance.HsmsMsgDefines.SelectMany(d => d.Msg));
+            Define = null;
+            ApplyDefine(defines ?? HsmsManager.Instance.HsmsMsgDefines.Where(t=>t.IsSelected == true).SelectMany(d => d.AllMsgs));
             return true;
         }
 
@@ -161,6 +166,7 @@ namespace HsmsTester.Hsms.Struct
                 .MaxBy(d => ValueMatchScore(d.Body, Body));
             if (best is null) return false;
 
+            Define = best;
             Name = best.Name;
             SubName = best.SubName;
             IsAutoResponse = best.IsAutoResponse;
@@ -288,6 +294,67 @@ namespace HsmsTester.Hsms.Struct
                 span[i] = (byte)value;
                 value >>= 8;
             }
+        }
+
+        // 로그용 SML 형태 문자열. 하위 항목은 레벨마다 Tab 한 칸씩 들여쓴다
+        // ex) <L[2]
+        //         <A[4] MDLN "HOST">
+        //         <U4[2] SVID 1 2>
+        //     >
+        public string ToSmlString()
+        {
+            if (Body is null) return "(Header Only)";
+
+            var sb = new StringBuilder();
+            AppendSml(Body, 0, sb);
+            return sb.ToString().TrimEnd();
+        }
+
+        private static readonly Dictionary<eHsmsDataType, string> SmlTypeNames = new()
+        {
+            [eHsmsDataType.LIST] = "L", [eHsmsDataType.BINARY] = "B", [eHsmsDataType.BOOL] = "BOOLEAN",
+            [eHsmsDataType.ASCII] = "A", [eHsmsDataType.JIS8] = "J",
+            [eHsmsDataType.INT1] = "I1", [eHsmsDataType.INT2] = "I2", [eHsmsDataType.INT4] = "I4", [eHsmsDataType.INT8] = "I8",
+            [eHsmsDataType.UINT1] = "U1", [eHsmsDataType.UINT2] = "U2", [eHsmsDataType.UINT4] = "U4", [eHsmsDataType.UINT8] = "U8",
+            [eHsmsDataType.FLOAT4] = "F4", [eHsmsDataType.FLOAT8] = "F8",
+        };
+
+        private static void AppendSml(HsmsField field, int depth, StringBuilder sb)
+        {
+            var indent = new string('\t', depth);
+            var type = SmlTypeNames.TryGetValue(field.Type, out var t) == true ? t : field.Type.ToString();
+            var name = field.Name == string.Empty ? string.Empty : $" {field.Name}";
+
+            if (field.IsList == true)
+            {
+                if (field.Fields.Count == 0)
+                {
+                    sb.Append(indent).Append($"<{type}[0]{name}>").Append('\n');
+                    return;
+                }
+
+                sb.Append(indent).Append($"<{type}[{field.Fields.Count}]{name}").Append('\n');
+                foreach (var item in field.Fields)
+                    AppendSml(item, depth + 1, sb);
+                sb.Append(indent).Append('>').Append('\n');
+                return;
+            }
+
+            string value;
+            int count;
+            if (field.Type is eHsmsDataType.ASCII or eHsmsDataType.JIS8)
+            {
+                var text = ToText(field.Value);
+                value = $" \"{text}\"";
+                count = text.Length;
+            }
+            else
+            {
+                var values = ToTextList(field.Value);
+                value = values.Count == 0 ? string.Empty : " " + string.Join(" ", values);
+                count = values.Count;
+            }
+            sb.Append(indent).Append($"<{type}[{count}]{name}{value}>").Append('\n');
         }
 
         private static List<string> ToTextList(object? value)

@@ -24,9 +24,13 @@ namespace HsmsTester.Hsms.Define
         public HsmsJson Reply { get; set; } = new HsmsJson();
         public List<HsmsReplyAction> Actions { get; set; } = [];
 
+        // Selected 조건이 있으면 메시지 수신이 아니라 Select 완료(IsSelected false → true) 시 전송되는 규칙
+        [JsonIgnore]
+        public bool IsSelectedTrigger => Conditions.Any(c => c.Op == ConditionalType.Selected);
+
         public bool IsMatch(HsmsJson received)
         {
-            if (Enabled == false || received.Stream != Stream || received.Function != Function) return false;
+            if (Enabled == false || IsSelectedTrigger == true || received.Stream != Stream || received.Function != Function) return false;
 
             return Conditions.All(c => c.Check(received.Body));
         }
@@ -167,6 +171,7 @@ namespace HsmsTester.Hsms.Define
         NotEqual,
         Bigger,
         Smaller,
+        Selected,       // Select 완료 시 전송 (Path, Value, 트리거 Stream/Function 사용 안 함)
     }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]

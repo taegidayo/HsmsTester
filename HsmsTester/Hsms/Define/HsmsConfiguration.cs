@@ -535,5 +535,79 @@ namespace HsmsTester.Hsms.Define
             LogPath = $"{Path.GetDirectoryName(ConfigPath)}\\LOG";
             KeepDays = 30;
         }
+
+        // API로 전달할 설정
+        public HsmsConfigData ToData() => new HsmsConfigData
+        {
+            DeviceID = DeviceID,
+            Host = Host,
+            SMLPath = SMLPath,
+            IPAddress = IPAddress,
+            Port = Port,
+            Active = Active,
+            UseMsgClass = UseMsgClass,
+            T3 = T3,
+            T5 = T5,
+            T6 = T6,
+            T7 = T7,
+            T8 = T8,
+            LogUse = LogUse,
+            LoggingEvent = LoggingEvent,
+            LoggingAlarm = LoggingAlarm,
+            LoggingHour = LoggingHour,
+            KeepDays = KeepDays,
+        };
+
+        // API로 받은 설정 적용. null인 항목은 변경하지 않는다. 값이 잘못되면 적용하지 않고 오류 목록 반환
+        public List<string> Apply(HsmsConfigData data)
+        {
+            var errors = new List<string>();
+            if (data.IPAddress is not null && System.Net.IPAddress.TryParse(data.IPAddress, out _) == false) errors.Add($"IPAddress 형식 오류 : {data.IPAddress}");
+            if (data.Port is < 1 or > 65535) errors.Add($"Port 범위 오류(1~65535) : {data.Port}");
+            if (data.T3 <= 0 || data.T5 <= 0 || data.T6 <= 0 || data.T7 <= 0 || data.T8 <= 0) errors.Add("Timeout은 0보다 커야 함");
+            if (data.KeepDays < 0) errors.Add($"KeepDays는 0 이상이어야 함 : {data.KeepDays}");
+            if (errors.Count > 0) return errors;
+
+            if (data.DeviceID is short deviceId) DeviceID = deviceId;
+            if (data.Host is bool host) Host = host;
+            if (data.SMLPath is not null) SMLPath = data.SMLPath;
+            if (data.IPAddress is not null) IPAddress = data.IPAddress;
+            if (data.Port is int port) Port = port;
+            if (data.Active is bool active) Active = active;
+            if (data.UseMsgClass is bool useMsgClass) UseMsgClass = useMsgClass;
+            if (data.T3 is int t3) T3 = t3;
+            if (data.T5 is int t5) T5 = t5;
+            if (data.T6 is int t6) T6 = t6;
+            if (data.T7 is int t7) T7 = t7;
+            if (data.T8 is int t8) T8 = t8;
+            if (data.LogUse is bool logUse) LogUse = logUse;
+            if (data.LoggingEvent is bool loggingEvent) LoggingEvent = loggingEvent;
+            if (data.LoggingAlarm is bool loggingAlarm) LoggingAlarm = loggingAlarm;
+            if (data.LoggingHour is bool loggingHour) LoggingHour = loggingHour;
+            if (data.KeepDays is int keepDays) KeepDays = keepDays;
+            return errors;
+        }
+    }
+
+    // API로 설정을 주고받을 때 사용하는 타입. 보낸 항목만 변경되도록 모두 nullable (ConfigPath, LogPath는 API에서 제외)
+    public record class HsmsConfigData
+    {
+        public short? DeviceID { get; set; }
+        public bool? Host { get; set; }
+        public string? SMLPath { get; set; }
+        public string? IPAddress { get; set; }
+        public int? Port { get; set; }
+        public bool? Active { get; set; }
+        public bool? UseMsgClass { get; set; }
+        public int? T3 { get; set; }
+        public int? T5 { get; set; }
+        public int? T6 { get; set; }
+        public int? T7 { get; set; }
+        public int? T8 { get; set; }
+        public bool? LogUse { get; set; }
+        public bool? LoggingEvent { get; set; }
+        public bool? LoggingAlarm { get; set; }
+        public bool? LoggingHour { get; set; }
+        public int? KeepDays { get; set; }
     }
 }
