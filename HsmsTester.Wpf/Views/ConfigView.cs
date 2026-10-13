@@ -1,4 +1,4 @@
-using HsmsTester.Hsms.Define;
+﻿using HsmsTester.Hsms.Define;
 using HsmsTester.Manager;
 using System.Globalization;
 using System.Windows;
@@ -80,11 +80,13 @@ namespace HsmsProtocol.Views
                         if (type == typeof(string)) { prop.SetValue(_form, v); return; }
                         try { prop.SetValue(_form, Convert.ChangeType(v, type, CultureInfo.InvariantCulture)); }
                         catch (Exception) { _parseErrors.Add(prop.Name); }
-                    }, 200);
+                    }, 200, hint: Hints.GetValueOrDefault(prop.Name) ?? prop.Name);
                 }
                 AddRow(Label(prop.Name, Hints.GetValueOrDefault(prop.Name)), editor, Muted(Hints.GetValueOrDefault(prop.Name) ?? string.Empty));
             }
 
+            // _message는 재사용되므로 이전 Render의 Row에서 먼저 떼어냄
+            (_message.Parent as Panel)?.Children.Remove(_message);
             var actions = Row(Button("Save", Save), Button("Reset", Load), _message);
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Grid.SetRow(actions, row);

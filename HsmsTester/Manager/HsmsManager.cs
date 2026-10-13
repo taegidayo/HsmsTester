@@ -50,6 +50,61 @@ namespace HsmsTester.Manager
         public List<HsmsMsgDefine> HsmsMsgDefines = [];
         public List<HsmsConditionalDefine> HsmsConditionalDefines = [];
 
+        // 지금 동작하는 조건 응답 : Enabled이고, 공통(Group 없음)이거나 사용(IsSelected) 그룹의 규칙
+        internal List<HsmsConditionalDefine> ActiveConditionalDefines()
+        {
+            var group = HsmsMsgDefines.FirstOrDefault(d => d.IsSelected == true)?.Name;
+            return HsmsConditionalDefines.Where(r => r.Enabled == true && (string.IsNullOrEmpty(r.Group) == true || r.Group == group)).ToList();
+        }
+
+        #region 처음 보는 메시지 (Undefined)
+
+        // 정의와 매칭되지 않은 받은 메시지. 메모리에만 보관 (최대 MAX_UNDEFINED개, 넘으면 오래된 것부터 삭제)
+        private const int MAX_UNDEFINED = 200;
+        private readonly List<(string Key, HsmsUndefinedMsg Item)> _undefined = new List<(string, HsmsUndefinedMsg)>();
+        private int _undefinedId = 0;
+
+        public List<HsmsUndefinedMsg> UndefinedMsgs
+        {
+            get { lock (_undefined) return _undefined.Select(u => u.Item).OrderByDescending(u => u.LastTime).ToList(); }
+        }
+
+        private void AddUndefined(HsmsJson recv)
+        {
+            var key = $"S{recv.Stream}F{recv.Function}:{HsmsJson.StructureKey(recv.Body)}";
+            lock (_undefined)
+            {
+                var found = _undefined.FirstOrDefault(u => u.Key == key).Item;
+                if (found is not null)
+                {
+                    found.Count++;
+                    found.LastTime = DateTime.Now;
+                    found.Msg = recv;
+                    found.Sml = recv.ToSmlString();
+                    return;
+                }
+
+                _undefined.Add((key, new HsmsUndefinedMsg
+                {
+                    Id = ++_undefinedId, FirstTime = DateTime.Now, LastTime = DateTime.Now, Count = 1, Msg = recv, Sml = recv.ToSmlString(),
+                }));
+                if (_undefined.Count > MAX_UNDEFINED) _undefined.RemoveAt(0);
+            }
+            LogBroadcaster.Instance.Write($"처음 보는 메시지 : S{recv.Stream}F{recv.Function} (Undefined 탭에서 정의에 추가 가능)");
+        }
+
+        public void RemoveUndefined(int id)
+        {
+            lock (_undefined) _undefined.RemoveAll(u => u.Item.Id == id);
+        }
+
+        public void ClearUndefined()
+        {
+            lock (_undefined) _undefined.Clear();
+        }
+
+        #endregion
+
         public bool T3TimeoutCheckFlag = false;// T3에 대한 결과를 확인하기 위한 플래그, true라면 S6F11에 대해 응답하지 않는다.
 
         // 메시지가 들어올 때까지 스레드가 대기(Take)하도록 BlockingCollection 사용
@@ -66,6 +121,8 @@ namespace HsmsTester.Manager
         private Thread _writeMsgThread = null;
         // 타임아웃 확인용 프로세스
         private Thread _timeoutCheckThread = null;
+        // 주기 전송 (IntervalMs가 설정된 조건 응답)
+        private Thread _periodicThread = null;
 
         // t3Time 체크를 위한 데이터
         private Dictionary<uint, ulong> _t3TimeoutCheck = new Dictionary<uint, ulong>();
@@ -80,6 +137,7 @@ namespace HsmsTester.Manager
             _systemByte = (uint)random.Next();
 
             HsmsMsgDefines = ReadJsonFile<List<HsmsMsgDefine>>(MsgDefinePath) ?? [];
+            HsmsMsgDefine.EnsureOneSelected(HsmsMsgDefines);
             HsmsConditionalDefines = ReadJsonFile<List<HsmsConditionalDefine>>(ConditionalDefinePath) ?? [];
         }
 
@@ -95,6 +153,7 @@ namespace HsmsTester.Manager
         // 메시지 정의를 파일로 저장하고 현재 정의로 교체
         public bool SaveMsgDefines(List<HsmsMsgDefine> defines)
         {
+            HsmsMsgDefine.EnsureOneSelected(defines);
             if (WriteJsonFile(MsgDefinePath, defines) == false) return false;
             HsmsMsgDefines = defines;
             return true;
@@ -103,6 +162,10 @@ namespace HsmsTester.Manager
         // 조건 응답 정의를 파일로 저장하고 현재 정의로 교체
         public bool SaveConditionalDefines(List<HsmsConditionalDefine> defines)
         {
+            // 주기는 최소 500ms
+            foreach (var rule in defines.Where(r => r.IsPeriodic == true && r.IntervalMs < HsmsConditionalDefine.MIN_INTERVAL_MS))
+                rule.IntervalMs = HsmsConditionalDefine.MIN_INTERVAL_MS;
+
             if (WriteJsonFile(ConditionalDefinePath, defines) == false) return false;
             HsmsConditionalDefines = defines;
             return true;
@@ -177,6 +240,7 @@ namespace HsmsTester.Manager
             _cts.Cancel();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
+            _lastSendTime = 0;      // 새 연결은 바로 Linktest 주기 시작
             _readMsgThread = new Thread(() => _readThreadDowork(token)) { IsBackground = true };
             _readMsgThread.Start();
 
@@ -185,6 +249,9 @@ namespace HsmsTester.Manager
 
             _timeoutCheckThread = new Thread(() => _timeoutCheckThreadDowork(token)) { IsBackground = true };
             _timeoutCheckThread.Start();
+
+            _periodicThread = new Thread(() => _periodicThreadDowork(token)) { IsBackground = true };
+            _periodicThread.Start();
         }
 
         public void Dispose()
@@ -347,6 +414,12 @@ namespace HsmsTester.Manager
                             if (json.FromHsmsBytes(recvMsg) == true)
                             {
                                 LogBroadcaster.Instance.Write($"Data Message 수신 : [{json.Header.StreamFunction}] {json.FullName}\n{msgToLog(json)}");
+                                // 정의와 매칭 안 됨, 또는 S6F11처럼 정의는 있지만 구조가 달라 통과시킨 경우 → 처음 보는 메시지 (Undefined)
+                                // (S6F11은 자동 응답도 그대로 보냄)
+                                if (json.Define is null || json.IsStructureMatched == false)
+                                {
+                                    AddUndefined(json);
+                                }
                                 SendAutoResponses(json);
                             }
                             else
@@ -358,9 +431,10 @@ namespace HsmsTester.Manager
 
                     }
                 }
+                catch (OperationCanceledException) { }      // 종료 요청
                 catch (Exception ex)
                 {
-
+                    LogBroadcaster.Instance.Write($"수신 처리 오류 : {ex.GetType().Name} {ex.Message}");
                 }
             }
         }
@@ -372,20 +446,26 @@ namespace HsmsTester.Manager
                 try
                 {
                     (HsmsHeaderMessage, byte[]) recvMsg = _sendMsgQueue.Take(token);     // 보낼 메시지가 올 때까지 대기
+                    if (IsConnected() == false)
                     {
-                        if (Config.Active == true)
-                        {
-                            _client.SendAsync(recvMsg.Item2);
-                        }
-                        else
-                        {
-                            _server.SendAsync(recvMsg.Item2);
-                        }
+                        LogBroadcaster.Instance.Write($"전송 안 됨 (연결 안 됨) : {recvMsg.Item1.StreamFunction} Stype={recvMsg.Item1.Stype}");
+                        continue;
+                    }
+
+                    // 전송이 끝날 때까지 기다려서 실패하면 로그 (메시지 순서도 보장)
+                    if (Config.Active == true)
+                    {
+                        _client?.SendAsync(recvMsg.Item2).GetAwaiter().GetResult();
+                    }
+                    else
+                    {
+                        _server?.SendAsync(recvMsg.Item2).GetAwaiter().GetResult();
                     }
                 }
+                catch (OperationCanceledException) { }      // 종료 요청
                 catch (Exception ex)
                 {
-
+                    LogBroadcaster.Instance.Write($"전송 오류 : {ex.GetType().Name} {ex.Message}");
                 }
             }
         }
@@ -409,7 +489,7 @@ namespace HsmsTester.Manager
                 }
                 catch (Exception ex)
                 {
-
+                    LogBroadcaster.Instance.Write($"Linktest 확인 오류 : {ex.GetType().Name} {ex.Message}");
                 }
             }
         }

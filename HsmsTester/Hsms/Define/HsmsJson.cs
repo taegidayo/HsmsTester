@@ -31,10 +31,14 @@ namespace HsmsTester.Hsms.Struct
 
         // ApplyDefine()에서 일치한 메시지 정의 원본 (자동 응답 시 같은 쌍의 Secondary를 찾기 위해 사용)
         [JsonIgnore]
-        public HsmsJson? Define { get; private set; } = null;    // 실제 Body 데이터, null이면 Header만 전송 (ex. S1F1)
+        public HsmsJson? Define { get; private set; } = null;
+
+        // Define과 Body 구조까지 일치했는지. false인데 Define이 있으면 S6F11처럼 구조가 달라도 통과시킨 경우
+        [JsonIgnore]
+        public bool IsStructureMatched { get; private set; } = false;
 
         // 메시지 내용(S, F, W)을 바탕으로 Data Message용 Header 작성. Length는 ToHsmsBytes()에서 채운다.
-        public void SetHeader(uint systemByte = 0)
+        public void SetHeader(uint? systemByte = null)
         {
             Header.DeviceID = HsmsManager.Instance.Config.DeviceID;
             Header.Stream = (byte)Stream;
@@ -44,7 +48,7 @@ namespace HsmsTester.Hsms.Struct
             Header.HeaderByte3 = (byte)Function;
             Header.Ptype = 0;
             Header.Stype = 0;       // 0 : Data Message
-            Header.SystemByte = systemByte != 0 ? systemByte : HsmsManager.Instance.NextDataSystemByte();
+            Header.SystemByte = systemByte ?? HsmsManager.Instance.NextDataSystemByte();     // null이면 새 SystemByte (0도 유효한 값)
             Header.FullName = FullName;
         }
 
@@ -86,6 +90,7 @@ namespace HsmsTester.Hsms.Struct
             SubName = string.Empty;
             IsAutoResponse = false;
             Define = null;
+            IsStructureMatched = false;
             ApplyDefine(defines ?? HsmsManager.Instance.HsmsMsgDefines.Where(t=>t.IsSelected == true).SelectMany(d => d.AllMsgs));
             return true;
         }
@@ -159,20 +164,37 @@ namespace HsmsTester.Hsms.Struct
 
         // 받은 메시지와 S/F, Body 구조가 일치하는 정의를 찾아 Name을 채운다.
         // 구조가 일치하는 정의가 여러 개면 (ex. CEID만 다른 S6F11) 정의에 적힌 값과 같은 항목이 가장 많은 정의를 선택, 동점이면 먼저 정의된 것
+        // 구조가 일치하는 정의가 없으면 Body가 없는 정의(구조를 정하지 않은 정의, ex. SMD의 빈 DataItem인 S6F11)를 사용
         public bool ApplyDefine(IEnumerable<HsmsJson> defines)
         {
-            var best = defines
-                .Where(d => d.Stream == Stream && d.Function == Function && IsSameStructure(d.Body, Body) == true)
+            var sameSf = defines.Where(d => d.Stream == Stream && d.Function == Function).ToList();
+            var best = sameSf
+                .Where(d => IsSameStructure(d.Body, Body) == true)
                 .MaxBy(d => ValueMatchScore(d.Body, Body));
+            bool sameStructure = best is not null;
+
+            // 구조가 일치하는 정의가 없을 때 : S6F11만 구조가 달라도 정의가 있으면 통과 (이벤트마다 리포트 구조가 다름, Body 없는 정의 우선)
+            // 그 외 메시지는 매칭 안 됨 → 처음 보는 메시지(Undefined)로 기록
+            if (best is null && Stream == 6 && Function == 11)
+            {
+                best = sameSf.FirstOrDefault(d => d.Body is null) ?? sameSf.FirstOrDefault();
+            }
             if (best is null) return false;
 
             Define = best;
+            IsStructureMatched = sameStructure;
             Name = best.Name;
             SubName = best.SubName;
             IsAutoResponse = best.IsAutoResponse;
-            ApplyNames(best.Body, Body);
+            if (sameStructure == true) ApplyNames(best.Body, Body);      // 구조가 다르면 아이템 이름은 붙이지 않음
             return true;
         }
+
+        // 구조 비교용 키 (타입과 리스트 항목 수). 처음 보는 메시지를 같은 구조끼리 묶을 때 사용
+        internal static string StructureKey(HsmsField? field) =>
+            field is null ? "-"
+            : field.IsList == true ? $"L{field.Fields.Count}({string.Join(",", field.Fields.Select(StructureKey))})"
+            : field.Type.ToString();
 
         private static bool IsSameStructure(HsmsField? define, HsmsField? recv)
         {
@@ -182,6 +204,8 @@ namespace HsmsTester.Hsms.Struct
 
             // 고정 List는 항목 수가 같아야 함, List N은 항목 수 무관
             if (define.Count != 0 && define.Fields.Count != recv.Fields.Count) return false;
+            // 항목이 없는 List 정의(<L[0]>)는 빈 List만 일치 (count 0이라 가변으로 보이지만 틀이 없으므로 아무 List나 받지 않음)
+            if (define.Fields.Count == 0) return recv.Fields.Count == 0;
             return Pairs(define, recv).All(p => IsSameStructure(p.Define, p.Recv) == true);
         }
 
@@ -310,7 +334,7 @@ namespace HsmsTester.Hsms.Struct
             return sb.ToString().TrimEnd();
         }
 
-        private static readonly Dictionary<eHsmsDataType, string> SmlTypeNames = new()
+        internal static readonly Dictionary<eHsmsDataType, string> SmlTypeNames = new()
         {
             [eHsmsDataType.LIST] = "L", [eHsmsDataType.BINARY] = "B", [eHsmsDataType.BOOL] = "BOOLEAN",
             [eHsmsDataType.ASCII] = "A", [eHsmsDataType.JIS8] = "J",

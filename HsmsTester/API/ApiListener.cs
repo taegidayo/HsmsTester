@@ -57,10 +57,7 @@ namespace HsmsTester.API
             app.MapPost("/api/sendMsg",(HsmsJson jsonData) =>
             {
 
-                //send Msg 함수
-                jsonData.SetHeader();
-
-                HsmsManager.Instance.EnequeueSendMsg(jsonData.Header, jsonData.ToHsmsBytes());
+                HsmsManager.Instance.SendMsg(jsonData);      // Header 작성 + 전송 + 로그
 
                 return Results.Ok(new { result = "ok" });
             });
@@ -124,6 +121,19 @@ namespace HsmsTester.API
                 }
             });
 
+            // 처음 보는 메시지 (정의와 매칭되지 않은 받은 메시지)
+            app.MapGet("/api/undefinedMsgLoad", () => Results.Ok(HsmsManager.Instance.UndefinedMsgs));
+            app.MapPost("/api/undefinedMsgRemove", (int id) =>
+            {
+                HsmsManager.Instance.RemoveUndefined(id);
+                return Results.Ok(new { result = "ok" });
+            });
+            app.MapPost("/api/undefinedMsgClear", () =>
+            {
+                HsmsManager.Instance.ClearUndefined();
+                return Results.Ok(new { result = "ok" });
+            });
+
             app.MapGet("/api/status", () =>
             {
                 var manager = HsmsManager.Instance;
@@ -135,6 +145,13 @@ namespace HsmsTester.API
             //    Results.Ok(new { echo = req.Text, length = req.Text.Length }));
 
             // SSE 스트림: 웹이 여기에 연결해서 로그를 실시간으로 받음
+            // 로그 기록 지우기 (Clear 버튼)
+            app.MapPost("/api/logs/clear", () =>
+            {
+                LogBroadcaster.Instance.Clear();
+                return Results.Ok(new { result = "ok" });
+            });
+
             app.MapGet("/api/logs/stream", async (HttpContext ctx) =>
             {
                 ctx.Response.Headers.ContentType = "text/event-stream; charset=utf-8;";
@@ -148,9 +165,24 @@ namespace HsmsTester.API
                         await ctx.Response.WriteAsync($"{line}\n\n");
                     await ctx.Response.Body.FlushAsync();
 
-                    await foreach (var line in reader.ReadAllAsync(ctx.RequestAborted))
+                    // 새 로그를 보내고, 15초 동안 로그가 없으면 연결 확인용 heartbeat(":")를 보냄
+                    // (웹은 일정 시간 아무것도 못 받으면 끊긴 것으로 보고 다시 연결)
+                    Task<bool>? waiting = null;
+                    while (true)
                     {
-                        await ctx.Response.WriteAsync($"{line}\n\n", ctx.RequestAborted);
+                        waiting ??= reader.WaitToReadAsync(ctx.RequestAborted).AsTask();
+                        var heartbeat = Task.Delay(TimeSpan.FromSeconds(15), ctx.RequestAborted);
+                        if (await Task.WhenAny(waiting, heartbeat) != waiting)
+                        {
+                            await ctx.Response.WriteAsync(":\n\n", ctx.RequestAborted);
+                            await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                            continue;
+                        }
+                        if (await waiting == false) break;      // 구독 종료
+                        waiting = null;
+
+                        while (reader.TryRead(out var line) == true)
+                            await ctx.Response.WriteAsync($"{line}\n\n", ctx.RequestAborted);
                         await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                     }
                 }

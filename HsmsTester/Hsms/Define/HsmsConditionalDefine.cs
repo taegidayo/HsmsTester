@@ -10,10 +10,14 @@ namespace HsmsTester.Hsms.Define
 {
     // 특정 메시지를 받았을 때, 자동으로 응답되게 하기 위한 조건 설정
     // Path 규칙 : Body 기준 Fields 인덱스를 '/'로 연결. "" = Body 자신, "1/0" = Body.Fields[1].Fields[0]
+    // Condition Path는 추가로 "*" = 모든 하위 항목, 이름 = 하위 전체에서 Name이 같은 항목 (ex. "RPTID", "2/*/0")
     public record class HsmsConditionalDefine
     {
         public string Name { get; set; } = string.Empty;
         public bool Enabled { get; set; } = true;
+
+        // Message Defines 그룹 이름. 사용(IsSelected) 그룹과 같을 때만 동작, 비어 있으면 공통 (항상 동작)
+        public string Group { get; set; } = string.Empty;
 
         // 트리거 : 이 메시지를 받으면
         public int Stream { get; set; }
@@ -24,13 +28,24 @@ namespace HsmsTester.Hsms.Define
         public HsmsJson Reply { get; set; } = new HsmsJson();
         public List<HsmsReplyAction> Actions { get; set; } = [];
 
+        // 주기 전송 (ms). 0 = 사용 안 함, 0보다 크면 Selected 상태인 동안 이 간격마다 Reply 전송 (트리거, 조건 무시)
+        public const int MIN_INTERVAL_MS = 500;
+        public int IntervalMs { get; set; } = 0;
+
+        [JsonIgnore]
+        public bool IsPeriodic => IntervalMs > 0;
+
+        // 실제 전송 간격 (최소 500ms)
+        [JsonIgnore]
+        public int EffectiveIntervalMs => Math.Max(IntervalMs, MIN_INTERVAL_MS);
+
         // Selected 조건이 있으면 메시지 수신이 아니라 Select 완료(IsSelected false → true) 시 전송되는 규칙
         [JsonIgnore]
-        public bool IsSelectedTrigger => Conditions.Any(c => c.Op == ConditionalType.Selected);
+        public bool IsSelectedTrigger => IsPeriodic == false && Conditions.Any(c => c.Op == ConditionalType.Selected);
 
-        public bool IsMatch(HsmsJson received)
+        public bool IsMatch(HsmsJson received)  
         {
-            if (Enabled == false || IsSelectedTrigger == true || received.Stream != Stream || received.Function != Function) return false;
+            if (Enabled == false || IsPeriodic == true || IsSelectedTrigger == true || received.Stream != Stream || received.Function != Function) return false;
 
             return Conditions.All(c => c.Check(received.Body));
         }
@@ -45,17 +60,25 @@ namespace HsmsTester.Hsms.Define
 
         internal static T DeepCopy<T>(T src) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(src))!;
 
-        internal static HsmsField? Find(HsmsField? root, string path)
+        // Action용 : 경로에 해당하는 첫 항목
+        internal static HsmsField? Find(HsmsField? root, string path) => FindAll(root, path).FirstOrDefault();
+
+        // 경로 탐색 : 숫자 = 인덱스, "*" = 모든 하위 항목, 그 외 = 하위 전체에서 Name이 같은 항목 (ex. "RPTID", "2/*/0")
+        internal static IEnumerable<HsmsField> FindAll(HsmsField? root, string path)
         {
-            if (root is null) return null;
-            var node = root;
+            if (root is null) return [];
+            IEnumerable<HsmsField> nodes = [root];
             foreach (var part in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
             {
-                if (int.TryParse(part, out var idx) == false || idx < 0 || idx >= node.Fields.Count) return null;
-                node = node.Fields[idx];
+                var p = part.Trim();
+                nodes = int.TryParse(p, out var idx) == true ? nodes.Where(n => idx >= 0 && idx < n.Fields.Count).Select(n => n.Fields[idx])
+                    : p == "*" ? nodes.SelectMany(n => n.Fields)
+                    : nodes.SelectMany(Descendants).Where(n => string.Equals(n.Name, p, StringComparison.OrdinalIgnoreCase));
             }
-            return node;
+            return nodes;
         }
+
+        private static IEnumerable<HsmsField> Descendants(HsmsField node) => node.Fields.SelectMany(f => Descendants(f).Prepend(f));
 
         internal static string ValueText(HsmsField field) => field.Value?.ToString() ?? string.Empty;
     }
@@ -66,16 +89,22 @@ namespace HsmsTester.Hsms.Define
         public ConditionalType Op { get; set; }
         public string Value { get; set; } = string.Empty;   // 둘 다 숫자면 숫자 비교, 아니면 문자열 비교
 
+        // 경로에 해당하는 항목이 여러 개면 (이름, "*") 하나라도 만족하면 true. NotEqual은 같은 값이 하나도 없어야 true
         public bool Check(HsmsField? receivedBody)
         {
-            var node = HsmsConditionalDefine.Find(receivedBody, Path);
-            if (node is null) return false;
+            var nodes = HsmsConditionalDefine.FindAll(receivedBody, Path).ToList();
+            if (nodes.Count == 0) return false;
+            if (Op == ConditionalType.NotEqual) return nodes.Any(n => Compare(n, ConditionalType.Equal) == true) == false;
+            return nodes.Any(n => Compare(n, Op) == true);
+        }
 
+        private bool Compare(HsmsField node, ConditionalType op)
+        {
             var actual = HsmsConditionalDefine.ValueText(node);
             if (double.TryParse(actual, NumberStyles.Float, CultureInfo.InvariantCulture, out var a) == true &&
                 double.TryParse(Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var b) == true)
             {
-                return Op switch
+                return op switch
                 {
                     ConditionalType.Equal => a == b,
                     ConditionalType.NotEqual => a != b,
@@ -85,7 +114,7 @@ namespace HsmsTester.Hsms.Define
                 };
             }
 
-            return Op switch
+            return op switch
             {
                 ConditionalType.Equal => actual == Value,
                 ConditionalType.NotEqual => actual != Value,

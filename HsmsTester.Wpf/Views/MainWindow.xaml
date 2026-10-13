@@ -7,5 +7,5 @@
         mc:Ignorable="d"
         Title="HSMS Tester" Height="850" Width="1500">
     <!-- 화면 구성은 웹(HsmsTester_Web)과 동일하게 코드에서 만든다 (MainWindow.xaml.cs) -->
-    <DockPanel x:Name="Root" />
+    <DockPanel x:Name="Root" Background="#F4F5F7" TextElement.FontSize="13" TextElement.Foreground="#222222" />
 </Window>

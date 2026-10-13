@@ -1,4 +1,4 @@
-using HsmsTester;
+﻿using HsmsTester;
 using HsmsTester.Hsms.Define;
 using HsmsTester.Hsms.Struct;
 using System.Collections;
@@ -29,7 +29,7 @@ namespace HsmsProtocol.Views
         public static readonly Brush DangerBrush = new SolidColorBrush(Color.FromRgb(0xC6, 0x28, 0x28));
 
         // Body 기준 Fields 인덱스 경로 설명 (HsmsConditionalDefine 주석과 동일)
-        public const string PathHint = "Body 기준 Fields 인덱스를 / 로 연결. \"\" = Body, \"1/0\" = Body.Fields[1].Fields[0]";
+        public const string PathHint = "Body 기준 Fields 인덱스를 / 로 연결. \"\" = Body, \"1/0\" = Body.Fields[1].Fields[0]. 이름(ex. RPTID) = 하위 전체에서 같은 Name, * = 모든 하위 항목 (Action은 첫 항목)";
 
         #region 기본 컨트롤
 
@@ -53,11 +53,28 @@ namespace HsmsProtocol.Views
         public static TextBlock Header(string text) =>
             new TextBlock { Text = text, FontWeight = FontWeights.Bold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
 
-        public static TextBox Text(string value, Action<string> onChange, double width = 120, string? tooltip = null)
+        // hint : 비어 있을 때 회색으로 보이는 안내 문구. 없으면 tooltip의 첫 문장 사용
+        public static TextBox Text(string value, Action<string> onChange, double width = 120, string? tooltip = null, string? hint = null)
         {
-            var box = new TextBox { Text = value, Width = width, ToolTip = tooltip, VerticalContentAlignment = VerticalAlignment.Center };
+            var box = new TextBox { Text = value, Width = width, ToolTip = tooltip ?? hint, VerticalContentAlignment = VerticalAlignment.Center };
+            hint ??= tooltip?.Split(". ")[0];
+            if (hint is not null) SetHint(box, hint);
             box.TextChanged += (_, _) => onChange(box.Text);
             return box;
+        }
+
+        // WPF TextBox에는 placeholder가 없으므로, 비어 있을 때만 배경에 안내 문구를 그린다
+        public static void SetHint(TextBox box, string hint)
+        {
+            var hintBrush = new VisualBrush(new TextBlock { Text = hint, Foreground = Brushes.Silver, FontStyle = FontStyles.Italic, Margin = new Thickness(3, 0, 0, 0) })
+            {
+                AlignmentX = AlignmentX.Left,
+                AlignmentY = AlignmentY.Center,
+                Stretch = Stretch.None,
+            };
+            void Update() => box.Background = box.Text == string.Empty ? hintBrush : Brushes.White;
+            box.TextChanged += (_, _) => Update();
+            Update();
         }
 
         public static TextBox Num(int value, Action<int> onChange, int min = 0, int max = int.MaxValue, string? tooltip = null)
@@ -70,6 +87,12 @@ namespace HsmsProtocol.Views
             return box;
         }
 
+        public static T WithTooltip<T>(T element, string tooltip) where T : FrameworkElement
+        {
+            element.ToolTip = tooltip;
+            return element;
+        }
+
         public static CheckBox Check(string text, bool value, Action<bool> onChange)
         {
             var check = new CheckBox { Content = text, IsChecked = value, VerticalAlignment = VerticalAlignment.Center };
@@ -80,9 +103,10 @@ namespace HsmsProtocol.Views
         public static ComboBox Combo<T>(IEnumerable<T> items, T selected, Action<T> onChange)
         {
             var combo = new ComboBox { ItemsSource = items.ToList(), SelectedItem = selected, MinWidth = 90 };
+            // 드롭다운이 닫힌 뒤 처리 : SelectionChanged 안에서 콤보를 포함한 화면을 다시 그리면 다음 입력 전까지 갱신이 안 보일 때가 있음
             combo.SelectionChanged += (_, _) =>
             {
-                if (combo.SelectedItem is T v) onChange(v);
+                if (combo.SelectedItem is T v) combo.Dispatcher.BeginInvoke(() => onChange(v));
             };
             return combo;
         }
@@ -126,7 +150,74 @@ namespace HsmsProtocol.Views
                 DockPanel.SetDock(r, Dock.Right);
                 dock.Children.Add(r);
             }
-            dock.Children.Add(new TextBlock { Text = text, Foreground = foreground ?? Brushes.Black, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+            dock.Children.Add(new TextBlock { Text = text, Foreground = foreground ?? Brushes.Black, VerticalAlignment = VerticalAlignment.Center });
+            return dock;
+        }
+
+        // 우클릭 메뉴. (메뉴 이름, 동작) 목록, 이름이 "-"이면 구분선
+        public static ContextMenu Menu(params (string Header, Action? OnClick)[] items)
+        {
+            var menu = new ContextMenu();
+            foreach (var (header, onClick) in items)
+            {
+                if (header == "-")
+                {
+                    menu.Items.Add(new Separator());
+                    continue;
+                }
+                var item = new MenuItem { Header = header };
+                if (onClick is not null) item.Click += (_, _) => onClick();
+                menu.Items.Add(item);
+            }
+            return menu;
+        }
+
+        // 접기/펴기 토글 (▼ 펼침 / ▶ 접힘). 클릭이 목록 항목 선택으로 전달되지 않도록 Handled 처리
+        public static TextBlock Toggle(bool expanded, Action onToggle, bool visible = true)
+        {
+            var toggle = new TextBlock
+            {
+                Text = expanded == true ? "▼" : "▶",
+                Width = 14, FontSize = 10, Foreground = MutedBrush,
+                Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center,
+                Visibility = visible == true ? Visibility.Visible : Visibility.Hidden,
+            };
+            toggle.MouseLeftButtonUp += (_, e) =>
+            {
+                e.Handled = true;
+                onToggle();
+            };
+            return toggle;
+        }
+
+        // 메시지 목록 한 항목 : 1줄 S/F/W + Name, 2줄 SubName (없으면 생략)
+        public static DockPanel MsgItemContent(HsmsJson m, string prefix, UIElement left, params UIElement[] right)
+        {
+            var dock = new DockPanel { LastChildFill = true };
+            foreach (var r in right)
+            {
+                DockPanel.SetDock(r, Dock.Right);
+                dock.Children.Add(r);
+            }
+            DockPanel.SetDock(left, Dock.Left);
+            dock.Children.Add(left);
+
+            var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            lines.Children.Add(new TextBlock
+            {
+                Text = $"{prefix}S{m.Stream}F{m.Function}{(m.Wbit == true ? " W" : string.Empty)} {m.Name}{(m.IsAutoResponse == true ? " ⟲" : string.Empty)}",
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+            if (m.SubName != string.Empty)
+            {
+                lines.Children.Add(new TextBlock
+                {
+                    Text = m.SubName, FontSize = 11, Foreground = MutedBrush,
+                    Margin = new Thickness(prefix == string.Empty ? 0 : 12, 0, 0, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = m.SubName,
+                });
+            }
+            dock.Children.Add(lines);
             return dock;
         }
 
@@ -158,6 +249,12 @@ namespace HsmsProtocol.Views
 
         #region 편집기
 
+        // LIST 항목이 바뀐 뒤 count 맞춤 : 고정 List는 항목 수, 가변(List N, count 0)은 유지. 비어 있던 List에 처음 넣으면 고정으로 시작
+        public static void SyncListCount(HsmsField list, int previousItemCount)
+        {
+            if (list.Count != 0 || previousItemCount == 0) list.Count = list.Fields.Count;
+        }
+
         public static HsmsJson NewMsg() => new HsmsJson { Stream = 1, Function = 1, Wbit = true };
         public static HsmsField NewField() => new HsmsField { Type = eHsmsDataType.ASCII, Value = string.Empty };
 
@@ -175,10 +272,9 @@ namespace HsmsProtocol.Views
                     Label("S"), Num(msg.Stream, v => msg.Stream = v, 0, 127),
                     Label("F"), Num(msg.Function, v => msg.Function = v, 0, 255),
                     Check("W-bit", msg.Wbit, v => msg.Wbit = v),
-                    Check("AutoResponse", msg.IsAutoResponse, v => msg.IsAutoResponse = v)));
-                root.Children.Add(Row(
-                    Label("Name"), Text(msg.Name, v => msg.Name = v, 150),
-                    Label("SubName"), Text(msg.SubName, v => msg.SubName = v, 220)));
+                    WithTooltip(Check("AutoResponse", msg.IsAutoResponse, v => msg.IsAutoResponse = v), "같은 쌍의 Secondary로 자동 응답. 조건 응답(Conditional)에 이 메시지의 응답(S, F+1)이 있으면 그 응답을 대신 보냄")));
+                root.Children.Add(Row(new TextBlock { Text = "Name", Width = 60, VerticalAlignment = VerticalAlignment.Center }, Text(msg.Name, v => msg.Name = v, 320, hint: "메시지 이름 (예: Are You There Request)")));
+                root.Children.Add(Row(new TextBlock { Text = "SubName", Width = 60, VerticalAlignment = VerticalAlignment.Center }, Text(msg.SubName, v => msg.SubName = v, 320, hint: "부가 이름 (같은 S/F 메시지 구분용)")));
 
                 var bodyButton = msg.Body is null
                     ? Button("+ Body", () => { msg.Body = NewField(); Render(); })
@@ -204,17 +300,28 @@ namespace HsmsProtocol.Views
                     field.Type = v;
                     rerender();
                 }),
-                Text(field.Name, v => field.Name = v, 110, "name"));
+                Text(field.Name, v => field.Name = v, 110, hint: "이름 (SVID 등)"));
 
             if (field.IsList == true)
             {
-                row.Children.Add(Label("count", "0 = List N (가변)"));
-                row.Children.Add(Num(field.Count, v => field.Count = v, 0, int.MaxValue, "0 = List N (가변)"));
-                row.Children.Add(Button("+ item", () => { field.Fields.Add(NewField()); rerender(); }));
+                // count는 항목 수로 자동 계산 (수정 불가). 가변(List N)이면 count 0
+                if (field.Count != 0) field.Count = field.Fields.Count;
+                row.Children.Add(Label($"count {field.Fields.Count}", "항목 수 (자동 계산)"));
+                var variable = Check("가변(N)", field.Count == 0, v => { field.Count = v == true ? 0 : field.Fields.Count; rerender(); });
+                variable.IsEnabled = field.Fields.Count > 0;
+                variable.ToolTip = "List N : 항목 수가 정해지지 않은 리스트 (첫 항목이 반복 틀). 체크하면 count 0으로 저장";
+                row.Children.Add(variable);
+                row.Children.Add(Button("+ item", () =>
+                {
+                    int before = field.Fields.Count;
+                    field.Fields.Add(NewField());
+                    SyncListCount(field, before);
+                    rerender();
+                }));
             }
             else
             {
-                var hint = field.Type is eHsmsDataType.ASCII or eHsmsDataType.JIS8 ? "text" : "value (여러 개는 공백 구분)";
+                var hint = field.Type is eHsmsDataType.ASCII or eHsmsDataType.JIS8 ? "문자열 값" : "값 (여러 개는 공백 구분)";
                 row.Children.Add(Text(ValueToText(field.Value), v => field.Value = TextToValue(field.Type, v), 220, hint));
             }
             if (onRemove is not null) row.Children.Add(DangerButton(onRemove));
@@ -224,7 +331,13 @@ namespace HsmsProtocol.Views
             {
                 foreach (var item in field.Fields.ToList())
                 {
-                    panel.Children.Add(FieldEditor(item, () => { field.Fields.Remove(item); rerender(); }, depth + 1, rerender));
+                    panel.Children.Add(FieldEditor(item, () =>
+                    {
+                        int before = field.Fields.Count;
+                        field.Fields.Remove(item);
+                        SyncListCount(field, before);
+                        rerender();
+                    }, depth + 1, rerender));
                 }
             }
             return panel;

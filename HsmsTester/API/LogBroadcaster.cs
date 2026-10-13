@@ -33,6 +33,12 @@ namespace HsmsTester.API
                 ch.Writer.TryWrite(line);
         }
 
+        // 로그 기록 지우기 (Clear). 새로 접속하는 화면에 이전 로그가 다시 나오지 않도록
+        internal void Clear()
+        {
+            while (_history.TryDequeue(out _) == true) { }
+        }
+
         internal (Guid Id, ChannelReader<string> Reader, string[] History) Subscribe()
         {
             var ch = Channel.CreateBounded<string>(new BoundedChannelOptions(1000)
