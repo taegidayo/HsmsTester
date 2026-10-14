@@ -1,4 +1,4 @@
-using HsmsTester;
+﻿using HsmsTester;
 using HsmsTester.Hsms.Define;
 using HsmsTester.Hsms.Struct;
 using System.Text.RegularExpressions;
@@ -11,11 +11,22 @@ namespace HsmsProtocol.Views
     {
         private static readonly Dictionary<string, eHsmsDataType> SmlTypes = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["BOOLEAN"] = eHsmsDataType.BOOL, ["BOOL"] = eHsmsDataType.BOOL,
-            ["U1"] = eHsmsDataType.UINT1, ["U2"] = eHsmsDataType.UINT2, ["U4"] = eHsmsDataType.UINT4, ["U8"] = eHsmsDataType.UINT8,
-            ["I1"] = eHsmsDataType.INT1, ["I2"] = eHsmsDataType.INT2, ["I4"] = eHsmsDataType.INT4, ["I8"] = eHsmsDataType.INT8,
-            ["F4"] = eHsmsDataType.FLOAT4, ["F8"] = eHsmsDataType.FLOAT8,
-            ["L"] = eHsmsDataType.LIST, ["A"] = eHsmsDataType.ASCII, ["B"] = eHsmsDataType.BINARY, ["J"] = eHsmsDataType.JIS8,
+            ["BOOLEAN"] = eHsmsDataType.BOOL,
+            ["BOOL"] = eHsmsDataType.BOOL,
+            ["U1"] = eHsmsDataType.UINT1,
+            ["U2"] = eHsmsDataType.UINT2,
+            ["U4"] = eHsmsDataType.UINT4,
+            ["U8"] = eHsmsDataType.UINT8,
+            ["I1"] = eHsmsDataType.INT1,
+            ["I2"] = eHsmsDataType.INT2,
+            ["I4"] = eHsmsDataType.INT4,
+            ["I8"] = eHsmsDataType.INT8,
+            ["F4"] = eHsmsDataType.FLOAT4,
+            ["F8"] = eHsmsDataType.FLOAT8,
+            ["L"] = eHsmsDataType.LIST,
+            ["A"] = eHsmsDataType.ASCII,
+            ["B"] = eHsmsDataType.BINARY,
+            ["J"] = eHsmsDataType.JIS8,
         };
 
         private static eHsmsDataType ToType(string raw) =>

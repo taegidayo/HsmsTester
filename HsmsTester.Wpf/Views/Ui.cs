@@ -178,8 +178,11 @@ namespace HsmsProtocol.Views
             var toggle = new TextBlock
             {
                 Text = expanded == true ? "▼" : "▶",
-                Width = 14, FontSize = 10, Foreground = MutedBrush,
-                Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center,
+                Width = 14,
+                FontSize = 10,
+                Foreground = MutedBrush,
+                Cursor = Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center,
                 Visibility = visible == true ? Visibility.Visible : Visibility.Hidden,
             };
             toggle.MouseLeftButtonUp += (_, e) =>
@@ -212,9 +215,12 @@ namespace HsmsProtocol.Views
             {
                 lines.Children.Add(new TextBlock
                 {
-                    Text = m.SubName, FontSize = 11, Foreground = MutedBrush,
+                    Text = m.SubName,
+                    FontSize = 11,
+                    Foreground = MutedBrush,
                     Margin = new Thickness(prefix == string.Empty ? 0 : 12, 0, 0, 0),
-                    TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = m.SubName,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    ToolTip = m.SubName,
                 });
             }
             dock.Children.Add(lines);
